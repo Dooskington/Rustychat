@@ -56,8 +56,6 @@ fn main() {
         poll.poll(&mut events, None).unwrap();
 
         for event in events.iter() {
-            println!("{:?}", event);
-
             match event.token() {
                 LOCAL_TOKEN => {
                     match server.accept() {
@@ -106,7 +104,18 @@ fn main() {
                         }
                     }
                     else if event.readiness().is_writable() {
-
+                        // Send all outgoing packets
+                        while let Some(packet) = connection.outgoing_packets.pop_front() {
+                            match send_bytes(&mut connection.socket, packet.as_bytes()) {
+                                Ok(sent_bytes) => {
+                                    println!("Sent {} bytes to client {:?}", sent_bytes, connection.token);
+                                },
+                                Err(e) => {
+                                    eprintln!("send_bytes() failed with error {:?}", e);
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -119,6 +128,8 @@ fn main() {
 
         // Process incoming bytes to create packets
         for (_, connection) in &mut connections {
+            poll.reregister(&connection.socket, connection.token, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
+
             if connection.buffer_offset == 0 {
                 continue;
             }
@@ -136,15 +147,7 @@ fn main() {
             println!("> {}", packet);
 
             for (_, connection) in &mut connections {
-                match send_bytes(&mut connection.socket, packet.as_bytes()) {
-                    Ok(sent_bytes) => {
-                        println!("Sent {} bytes", sent_bytes);
-                    },
-                    Err(e) => {
-                        eprintln!("send_bytes() failed with error {:?}", e);
-                        break;
-                    }
-                }
+                connection.outgoing_packets.push_back(packet.clone());
             }
         }
     }

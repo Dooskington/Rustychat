@@ -77,6 +77,10 @@ fn process_key_input(input_man: &mut InputMan, event: &KeyboardInput) {
 
             input_man.current_keys.insert(keycode, true);
 
+            if keycode == VirtualKeyCode::Back {
+                input_man.input_string.pop();
+            }
+
             // Add the key to the input string if possible
             if let Some(key_string) = keycode_to_string(keycode, event.modifiers.shift) {
                 input_man.input_string.push_str(&key_string);
