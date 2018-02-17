@@ -1,18 +1,27 @@
 extern crate mio;
 extern crate bytes;
-#[macro_use] extern crate text_io;
+extern crate gfx;
 
-use std::collections::HashMap;
+use std::time::Duration;
 use std::collections::VecDeque;
 use std::io::{self, Read, Write, Error, ErrorKind};
 use std::str;
 use mio::*;
-use mio::net::{TcpListener, TcpStream};
-use bytes::{Bytes, BytesMut, Buf, BufMut};
+use mio::net::TcpStream;
+use gfx::{input, Window, Renderer};
+use gfx::input::{InputMan};
 
 const LOCAL_TOKEN: Token = Token(0);
 
 fn main() {
+    let window_title: &str = "Rustychat";
+    let window_width: u32 = 50 * gfx::CELL_WIDTH;
+    let window_height: u32 = 15 * gfx::CELL_HEIGHT;
+
+    let mut window: Window = Window::new(window_title, window_width, window_height);
+    let mut renderer: Renderer = Renderer::new(&window);
+    let mut input_man: InputMan = InputMan::new();
+
     // Setup the client socket
     let addr = "127.0.0.1:7667".parse().unwrap();
     let mut socket = TcpStream::connect(&addr).unwrap();
@@ -26,27 +35,53 @@ fn main() {
     // Create storage for events
     let mut events = Events::with_capacity(1024);
 
-    //let mut buffer = BytesMut::with_capacity(1024);
-    //buffer.put(&b"1234_56789"[..]);
-    //let mut buffer = Vec::with_capacity(1024);
     let mut buffer = [0; 1024];
 
     let mut is_disconnected: bool = false;
 
-    let mut test_buf = BytesMut::with_capacity(1024);
-    test_buf.put(&b"Hello from the client"[..]);
-
     let mut outgoing_packets: VecDeque<String> = VecDeque::new();
 
+    let mut messages: Vec<String> = Vec::new();
+    messages.push(String::from("one"));
+    messages.push(String::from("two"));
+    messages.push(String::from("three"));
+
     loop {
-        println!("Type message:");
-        let input: String = read!("{}\n");
-        outgoing_packets.push_back(input);
+        // UI
+        input::process_events(&mut window, &mut input_man);
+        if window.is_close_requested {
+            break;
+        }
 
-        poll.poll(&mut events, None).unwrap();
+        if input::is_key_pressed(&input_man, input::VirtualKeyCode::Return) {
+            let message: String = input_man.input_string.clone();
+            input_man.clear_input_string();
+
+            outgoing_packets.push_back(message);
+        }
+
+        gfx::clear(&mut renderer);
+
+        let mut line_count = 0;
+        for message in &messages {
+            if line_count >= 32 {
+                break;
+            }
+
+            gfx::draw_string(&mut renderer, 0, 1 + line_count, &message);
+            line_count += 1;
+        }
+
+        gfx::draw_string(&mut renderer, 0, 0, &format!("> {}", input_man.input_string));
+
+        gfx::render(&mut renderer);
+        gfx::display(&window);
+
+        input::update_input(&mut input_man);
+
+        // Networking
+        poll.poll(&mut events, Some(Duration::from_millis(1))).unwrap();
         for event in events.iter() {
-            println!("{:?}", event);
-
             match event.token() {
                 LOCAL_TOKEN => {
                     if event.readiness().is_readable() {
@@ -77,7 +112,7 @@ fn main() {
                         }
 
                         while let Some(packet) = outgoing_packets.pop_front() {
-                            match send_all(&mut socket, packet.as_bytes()) {
+                            match send_bytes(&mut socket, packet.as_bytes()) {
                                 Ok(sent_bytes) => {
                                     println!("Sent {} bytes", sent_bytes);
                                 },
@@ -97,10 +132,13 @@ fn main() {
             println!("Connection closed.");
             break;
         }
+
+        // Need to reregister for events
+        poll.reregister(&socket, LOCAL_TOKEN, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
     }
 }
 
-fn send_all(socket: &mut TcpStream, buffer: &[u8]) -> Result<usize, io::Error> {
+fn send_bytes(socket: &mut TcpStream, buffer: &[u8]) -> Result<usize, io::Error> {
     let mut len = buffer.len();
     if len == 0 {
         return Err(Error::new(ErrorKind::InvalidData, "Buffer is empty!"));

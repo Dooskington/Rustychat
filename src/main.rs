@@ -1,18 +1,21 @@
 extern crate mio;
 extern crate bytes;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read, Write};
+use std::str;
 use mio::*;
 use mio::net::{TcpListener, TcpStream};
-use bytes::{Bytes, BytesMut, Buf, BufMut};
 
 const LOCAL_TOKEN: Token = Token(0);
 
 struct Connection {
     token: Token,
     socket: TcpStream,
-    is_disconnected: bool
+    is_disconnected: bool,
+    buffer: [u8; 1024],
+    buffer_offset: usize,
+    outgoing_packets: VecDeque<String>
 }
 
 impl Connection {
@@ -20,7 +23,10 @@ impl Connection {
         Connection {
             token,
             socket,
-            is_disconnected: false
+            is_disconnected: false,
+            buffer: [0; 1024],
+            buffer_offset: 0,
+            outgoing_packets: VecDeque::new()
         }
     }
 }
@@ -44,10 +50,7 @@ fn main() {
     let mut next_token_index: usize = 0;
     let mut connections: HashMap<Token, Connection> = HashMap::new();
 
-    let mut buffer = [0; 1024];
-
-    let mut test_buf = BytesMut::with_capacity(1024);
-    test_buf.put(&b"Test"[..]);
+    let mut incoming_packets: VecDeque<String> = VecDeque::new();
 
     loop {
         poll.poll(&mut events, None).unwrap();
@@ -81,7 +84,7 @@ fn main() {
                     if event.readiness().is_readable() {
                         loop {
                             // Read until there are no more incoming bytes
-                            match connection.socket.read(&mut buffer) {
+                            match connection.socket.read(&mut connection.buffer) {
                                 Ok(0) => {
                                     // Socket is closed
                                     println!("Client {:?} has disconnected!", token);
@@ -90,7 +93,8 @@ fn main() {
                                     break;
                                 },
                                 Ok(read_bytes) => {
-                                    println!("Read {} bytes from client {:?}", read_bytes, token);
+                                    connection.buffer_offset += read_bytes;
+                                    println!("Read {} bytes from client {:?}, they have {} bytes so far", read_bytes, token, connection.buffer_offset);
                                 },
                                 Err(e) => {
                                     if e.kind() == io::ErrorKind::WouldBlock {
@@ -102,21 +106,7 @@ fn main() {
                         }
                     }
                     else if event.readiness().is_writable() {
-                        /*
-                        loop {
-                            match connection.socket.write(&test_buf) {
-                                Ok(sent_bytes) => {
-                                    println!("Sent {} bytes to client {:?}", sent_bytes, token);
-                                    break;
-                                },
-                                Err(e) => {
-                                    if e.kind() == io::ErrorKind::WouldBlock {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        */
+
                     }
                 }
             }
@@ -126,5 +116,24 @@ fn main() {
         connections = connections.into_iter()
             .filter(|&(_, ref v)| !v.is_disconnected)
             .collect();
+
+        // Process incoming bytes to create packets
+        for (token, connection) in &mut connections {
+            if connection.buffer_offset == 0 {
+                continue;
+            }
+
+            let len = connection.buffer_offset;
+            let message = String::from(str::from_utf8(&connection.buffer[0..len]).unwrap());
+            incoming_packets.push_back(message);
+
+            connection.buffer = [0; 1024];
+            connection.buffer_offset = 0;
+        }
+
+        // Handle packets
+        while let Some(packet) = incoming_packets.pop_front() {
+            println!("MESSAGE: {}", packet);
+        }
     }
 }

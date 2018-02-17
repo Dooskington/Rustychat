@@ -4,9 +4,9 @@ version = "0.1.0"
 authors = ["Declan Hopkins <hopkins.declan@gmail.com>"]
 
 [dependencies]
+gfx = { path = "gfx-lib" }
 mio = "0.6"
 bytes = "0.4"
-text_io = "0.1.7"
 
 [[bin]]
 name = "client"
