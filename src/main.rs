@@ -2,7 +2,7 @@ extern crate mio;
 extern crate bytes;
 
 use std::collections::{HashMap, VecDeque};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Write, Error, ErrorKind};
 use std::str;
 use mio::*;
 use mio::net::{TcpListener, TcpStream};
@@ -118,7 +118,7 @@ fn main() {
             .collect();
 
         // Process incoming bytes to create packets
-        for (token, connection) in &mut connections {
+        for (_, connection) in &mut connections {
             if connection.buffer_offset == 0 {
                 continue;
             }
@@ -133,7 +133,40 @@ fn main() {
 
         // Handle packets
         while let Some(packet) = incoming_packets.pop_front() {
-            println!("MESSAGE: {}", packet);
+            println!("> {}", packet);
+
+            for (_, connection) in &mut connections {
+                match send_bytes(&mut connection.socket, packet.as_bytes()) {
+                    Ok(sent_bytes) => {
+                        println!("Sent {} bytes", sent_bytes);
+                    },
+                    Err(e) => {
+                        eprintln!("send_bytes() failed with error {:?}", e);
+                        break;
+                    }
+                }
+            }
         }
     }
+}
+
+fn send_bytes(socket: &mut TcpStream, buffer: &[u8]) -> Result<usize, io::Error> {
+    let mut len = buffer.len();
+    if len == 0 {
+        return Err(Error::new(ErrorKind::InvalidData, "Buffer is empty!"));
+    }
+
+    // Keep sending until we've sent the entire buffer
+    while len > 0 {
+        match socket.write(buffer) {
+            Ok(sent_bytes) => {
+                len -= sent_bytes;
+            },
+            Err(e) => {
+                return Err(e);
+            }
+        }
+    }
+
+    Ok(buffer.len())
 }

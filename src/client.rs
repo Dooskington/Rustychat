@@ -36,15 +36,14 @@ fn main() {
     let mut events = Events::with_capacity(1024);
 
     let mut buffer = [0; 1024];
+    let mut buffer_offset: usize = 0;
 
     let mut is_disconnected: bool = false;
 
+    let mut incoming_packets: VecDeque<String> = VecDeque::new();
     let mut outgoing_packets: VecDeque<String> = VecDeque::new();
 
     let mut messages: Vec<String> = Vec::new();
-    messages.push(String::from("one"));
-    messages.push(String::from("two"));
-    messages.push(String::from("three"));
 
     loop {
         // UI
@@ -63,7 +62,7 @@ fn main() {
         gfx::clear(&mut renderer);
 
         let mut line_count = 0;
-        for message in &messages {
+        for message in messages.iter().rev() {
             if line_count >= 32 {
                 break;
             }
@@ -95,7 +94,8 @@ fn main() {
                                     break;
                                 },
                                 Ok(read_bytes) => {
-                                    println!("Read {} bytes from server: {}", read_bytes, str::from_utf8(&buffer).unwrap());
+                                    buffer_offset += read_bytes;
+                                    println!("Read {} bytes from server", read_bytes);
                                 },
                                 Err(e) => {
                                     if e.kind() == io::ErrorKind::WouldBlock {
@@ -117,7 +117,7 @@ fn main() {
                                     println!("Sent {} bytes", sent_bytes);
                                 },
                                 Err(e) => {
-                                    eprintln!("send() failed with error {:?}", e);
+                                    eprintln!("send_bytes() failed with error {:?}", e);
                                     break;
                                 }
                             }
@@ -135,6 +135,23 @@ fn main() {
 
         // Need to reregister for events
         poll.reregister(&socket, LOCAL_TOKEN, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
+
+        // Process incoming bytes to create packets
+        if buffer_offset == 0 {
+            continue;
+        }
+
+        let message = String::from(str::from_utf8(&buffer[0..buffer_offset]).unwrap());
+        incoming_packets.push_back(message);
+
+        buffer = [0; 1024];
+        buffer_offset = 0;
+
+        // Handle packets
+        while let Some(packet) = incoming_packets.pop_front() {
+            println!("> {}", packet);
+            messages.push(packet);
+        }
     }
 }
 
