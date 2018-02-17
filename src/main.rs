@@ -1,82 +1,130 @@
-extern crate tokio;
-extern crate tokio_io;
-extern crate futures;
+extern crate mio;
 extern crate bytes;
 
-use std::str;
-use tokio::executor::current_thread;
-use tokio::net::TcpListener;
-use tokio_io::{io, AsyncRead};
-use futures::{Future, Stream};
-use bytes::{BytesMut, BufMut};
+use std::collections::HashMap;
+use std::io::{self, Read, Write};
+use mio::*;
+use mio::net::{TcpListener, TcpStream};
+use bytes::{Bytes, BytesMut, Buf, BufMut};
 
-fn main() {
-    let addr = "127.0.0.1:7667".parse().unwrap();
-    let listener = TcpListener::bind(&addr).unwrap();
+const LOCAL_TOKEN: Token = Token(0);
 
-    let server = listener.incoming().for_each(|socket| {
-        let remote_addr = socket.peer_addr().unwrap();
-        println!("Connection accepted: {}", remote_addr);
-
-        let (reader, writer) = socket.split();
-
-        /*
-        let welcome = io::write_all(writer, "Welcome to the server.\n")
-            .then(move |result| {
-                match result {
-                    Ok((_, buf)) => println!("Wrote {} bytes to {}", buf.len(), remote_addr),
-                    Err(e) => println!("Error on {}: {}", remote_addr, e),
-                }
-                Ok(())
-            });
-        */
-
-        let mut buf = BytesMut::with_capacity(1024);
-        buf.reserve(2);
-        buf.put_slice(b"xy");
-        println!("len is {}, contents are {}", buf.len(), str::from_utf8(&buf).unwrap());
-        let read_input = io::read(reader, buf)
-            .then(move |result| {
-                match result {
-                    Ok((_, buf, size)) => println!("{} says {}", remote_addr, size),
-                    Err(e) => println!("Error on {}: {}", remote_addr, e),
-                }
-                Ok(())
-            });
-
-        /*
-        let echo = io::copy(reader, writer);
-
-        let complete = echo.then(move |result| {
-            match result {
-                Ok((sent, _, _)) => println!("Wrote {} bytes to {}", sent, remote_addr),
-                Err(e) => println!("Error on {}: {}", remote_addr, e),
-            }
-
-            Ok(())
-        });
-        */
-
-        // Spawn a new task that handles the socket:
-        current_thread::spawn(read_input);
-
-        Ok(())
-    })
-    .map_err(|err| {
-        println!("Error! {:?}", err);
-    });
-
-    current_thread::run(|_| {
-        current_thread::spawn(server);
-
-        println!("Server running on {}", addr);
-    });
+struct Connection {
+    token: Token,
+    socket: TcpStream,
+    is_disconnected: bool
 }
 
+impl Connection {
+    pub fn new(token: Token, socket: TcpStream) -> Self {
+        Connection {
+            token,
+            socket,
+            is_disconnected: false
+        }
+    }
+}
 
-// io::write_all
-/*
-    "The buf parameter here only requires the AsRef<[u8]> trait,
-    which should be broadly applicable to accepting data which can be converted to a slice."
-    Could be useful? Maybe packets implement that trait.
-*/
+fn main() {
+    // Setup the server socket
+    let addr = "127.0.0.1:7667".parse().unwrap();
+    let server = TcpListener::bind(&addr).unwrap();
+
+    println!("Server started on {}", addr);
+
+    // Create a poll instance
+    let poll = Poll::new().unwrap();
+
+    // Start listening for incoming connections
+    poll.register(&server, LOCAL_TOKEN, Ready::readable(), PollOpt::edge()).unwrap();
+
+    // Create storage for events
+    let mut events = Events::with_capacity(1024);
+
+    let mut next_token_index: usize = 0;
+    let mut connections: HashMap<Token, Connection> = HashMap::new();
+
+    let mut buffer = [0; 1024];
+
+    let mut test_buf = BytesMut::with_capacity(1024);
+    test_buf.put(&b"Test"[..]);
+
+    loop {
+        poll.poll(&mut events, None).unwrap();
+
+        for event in events.iter() {
+            println!("{:?}", event);
+
+            match event.token() {
+                LOCAL_TOKEN => {
+                    match server.accept() {
+                        Ok((socket, addr)) => {
+                            println!("New connection from {}", addr);
+
+                            next_token_index += 1;
+                            let token = Token(next_token_index);
+
+                            poll.register(&socket, token, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
+
+                            let connection = Connection::new(token, socket);
+                            connections.insert(token, connection);
+
+                            println!("There are now {} clients connected.", connections.len());
+                        },
+                        Err(e) => println!("{}", e)
+                    }
+                },
+                token => {
+                    // Get the connection
+                    let connection: &mut Connection = connections.get_mut(&token).unwrap();
+
+                    if event.readiness().is_readable() {
+                        loop {
+                            // Read until there are no more incoming bytes
+                            match connection.socket.read(&mut buffer) {
+                                Ok(0) => {
+                                    // Socket is closed
+                                    println!("Client {:?} has disconnected!", token);
+                                    connection.is_disconnected = true;
+
+                                    break;
+                                },
+                                Ok(read_bytes) => {
+                                    println!("Read {} bytes from client {:?}", read_bytes, token);
+                                },
+                                Err(e) => {
+                                    if e.kind() == io::ErrorKind::WouldBlock {
+                                        // Socket is not ready anymore, stop reading
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else if event.readiness().is_writable() {
+                        /*
+                        loop {
+                            match connection.socket.write(&test_buf) {
+                                Ok(sent_bytes) => {
+                                    println!("Sent {} bytes to client {:?}", sent_bytes, token);
+                                    break;
+                                },
+                                Err(e) => {
+                                    if e.kind() == io::ErrorKind::WouldBlock {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        */
+                    }
+                }
+            }
+        }
+
+        // Remove any disconnected clients
+        connections = connections.into_iter()
+            .filter(|&(_, ref v)| !v.is_disconnected)
+            .collect();
+    }
+}
