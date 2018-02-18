@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Declan Hopkins <hopkins.declan@gmail.com>"]
 
 [dependencies]
-gfx = { path = "gfx-lib" }
+gfx = { path = "gfx-lib", optional = true }
 doosknet = { path = "net-lib" }
 mio = "0.6"
 bytes = "0.4"
@@ -17,6 +17,10 @@ rand = "0.4.2"
 [[bin]]
 name = "client"
 path = "src/client.rs"
+required-features = ["opengl"]
+
+[features]
+opengl = ["gfx"]
 
 [[bin]]
 name = "server"
