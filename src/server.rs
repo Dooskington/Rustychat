@@ -1,21 +1,26 @@
+extern crate serde;
+extern crate bincode;
 extern crate mio;
 extern crate bytes;
+extern crate byteorder;
+extern crate doosknet;
 
 use std::collections::{HashMap, VecDeque};
-use std::io::{self, Read, Write, Error, ErrorKind};
+use std::io::{self, Read, Write, Error, ErrorKind, Cursor};
 use std::str;
 use mio::*;
 use mio::net::{TcpListener, TcpStream};
+use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
+use doosknet::*;
 
-const LOCAL_TOKEN: Token = Token(0);
+static SERVER_USERNAME: &'static str = "SERVER";
 
 struct Connection {
     token: Token,
     socket: TcpStream,
     is_disconnected: bool,
-    buffer: [u8; 1024],
-    buffer_offset: usize,
-    outgoing_packets: VecDeque<String>
+    buffer: NetworkBuffer,
+    outgoing_packets: VecDeque<Packet>
 }
 
 impl Connection {
@@ -24,8 +29,7 @@ impl Connection {
             token,
             socket,
             is_disconnected: false,
-            buffer: [0; 1024],
-            buffer_offset: 0,
+            buffer: NetworkBuffer::new(),
             outgoing_packets: VecDeque::new()
         }
     }
@@ -50,7 +54,7 @@ fn main() {
     let mut next_token_index: usize = 0;
     let mut connections: HashMap<Token, Connection> = HashMap::new();
 
-    let mut incoming_packets: VecDeque<String> = VecDeque::new();
+    let mut incoming_packets: VecDeque<Packet> = VecDeque::new();
 
     loop {
         poll.poll(&mut events, None).unwrap();
@@ -67,7 +71,10 @@ fn main() {
 
                             poll.register(&socket, token, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
 
-                            let connection = Connection::new(token, socket);
+                            send_all_msg("A client entered the room.", &mut connections);
+
+                            let mut connection = Connection::new(token, socket);
+                            send_msg("Welcome to Rustychat!", &mut connection);
                             connections.insert(token, connection);
 
                             println!("There are now {} clients connected.", connections.len());
@@ -82,7 +89,7 @@ fn main() {
                     if event.readiness().is_readable() {
                         loop {
                             // Read until there are no more incoming bytes
-                            match connection.socket.read(&mut connection.buffer) {
+                            match connection.socket.read(&mut connection.buffer.data) {
                                 Ok(0) => {
                                     // Socket is closed
                                     println!("Client {:?} has disconnected!", token);
@@ -91,8 +98,8 @@ fn main() {
                                     break;
                                 },
                                 Ok(read_bytes) => {
-                                    connection.buffer_offset += read_bytes;
-                                    println!("Read {} bytes from client {:?}, they have {} bytes so far", read_bytes, token, connection.buffer_offset);
+                                    connection.buffer.offset += read_bytes;
+                                    println!("Read {} bytes from client {:?}", read_bytes, token);
                                 },
                                 Err(e) => {
                                     if e.kind() == io::ErrorKind::WouldBlock {
@@ -106,7 +113,8 @@ fn main() {
                     else if event.readiness().is_writable() {
                         // Send all outgoing packets
                         while let Some(packet) = connection.outgoing_packets.pop_front() {
-                            match send_bytes(&mut connection.socket, packet.as_bytes()) {
+                            let data = serialize_packet(packet);
+                            match send_bytes(&mut connection.socket, &data) {
                                 Ok(sent_bytes) => {
                                     println!("Sent {} bytes to client {:?}", sent_bytes, connection.token);
                                 },
@@ -130,46 +138,42 @@ fn main() {
         for (_, connection) in &mut connections {
             poll.reregister(&connection.socket, connection.token, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
 
-            if connection.buffer_offset == 0 {
+            if connection.buffer.offset == 0 {
                 continue;
             }
 
-            let len = connection.buffer_offset;
-            let message = String::from(str::from_utf8(&connection.buffer[0..len]).unwrap());
-            incoming_packets.push_back(message);
+            while let Some(packet) = deserialize_packet(&mut connection.buffer) {
+                incoming_packets.push_back(packet);
+            }
 
-            connection.buffer = [0; 1024];
-            connection.buffer_offset = 0;
+            connection.buffer.clear();
         }
 
         // Handle packets
         while let Some(packet) = incoming_packets.pop_front() {
-            println!("> {}", packet);
+            println!("> {}", packet.message);
 
-            for (_, connection) in &mut connections {
-                connection.outgoing_packets.push_back(packet.clone());
-            }
+            send_all(packet, &mut connections);
         }
     }
 }
 
-fn send_bytes(socket: &mut TcpStream, buffer: &[u8]) -> Result<usize, io::Error> {
-    let mut len = buffer.len();
-    if len == 0 {
-        return Err(Error::new(ErrorKind::InvalidData, "Buffer is empty!"));
-    }
+fn send(packet: Packet, connection: &mut Connection) {
+    connection.outgoing_packets.push_back(packet.clone());
+}
 
-    // Keep sending until we've sent the entire buffer
-    while len > 0 {
-        match socket.write(buffer) {
-            Ok(sent_bytes) => {
-                len -= sent_bytes;
-            },
-            Err(e) => {
-                return Err(e);
-            }
-        }
+fn send_all(packet: Packet, connections: &mut HashMap<Token, Connection>) {
+    for (_, connection) in connections {
+        connection.outgoing_packets.push_back(packet.clone());
     }
+}
 
-    Ok(buffer.len())
+fn send_msg(message: &str, connection: &mut Connection) {
+    let packet: Packet = Packet::new(SERVER_USERNAME, message);
+    send(packet, connection);
+}
+
+fn send_all_msg(message: &str, connections: &mut HashMap<Token, Connection>) {
+    let packet: Packet = Packet::new(SERVER_USERNAME, message);
+    send_all(packet, connections);
 }

@@ -1,17 +1,19 @@
 extern crate mio;
 extern crate bytes;
 extern crate gfx;
+extern crate doosknet;
+extern crate byteorder;
 
 use std::time::Duration;
 use std::collections::VecDeque;
-use std::io::{self, Read, Write, Error, ErrorKind};
+use std::io::{self, Read, Write, Error, ErrorKind, Cursor};
 use std::str;
 use mio::*;
 use mio::net::TcpStream;
 use gfx::{input, Window, Renderer};
 use gfx::input::{InputMan};
-
-const LOCAL_TOKEN: Token = Token(0);
+use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
+use doosknet::*;
 
 fn main() {
     let window_title: &str = "Rustychat";
@@ -35,13 +37,12 @@ fn main() {
     // Create storage for events
     let mut events = Events::with_capacity(1024);
 
-    let mut buffer = [0; 1024];
-    let mut buffer_offset: usize = 0;
+    let mut buffer: NetworkBuffer = NetworkBuffer::new();
 
     let mut is_disconnected: bool = false;
 
-    let mut incoming_packets: VecDeque<String> = VecDeque::new();
-    let mut outgoing_packets: VecDeque<String> = VecDeque::new();
+    let mut incoming_packets: VecDeque<Packet> = VecDeque::new();
+    let mut outgoing_packets: VecDeque<Packet> = VecDeque::new();
 
     let mut messages: Vec<String> = Vec::new();
 
@@ -56,7 +57,10 @@ fn main() {
             let message: String = input_man.input_string.clone();
             input_man.clear_input_string();
 
-            outgoing_packets.push_back(message);
+            if message.len() != 0 {
+                let packet = Packet::new("Client", &message);
+                outgoing_packets.push_back(packet);
+            }
         }
 
         gfx::clear(&mut renderer);
@@ -86,7 +90,7 @@ fn main() {
                     if event.readiness().is_readable() {
                         loop {
                             // Read until there are no more incoming bytes
-                            match socket.read(&mut buffer) {
+                            match socket.read(&mut buffer.data) {
                                 Ok(0) => {
                                     // Socket is closed
                                     println!("Disconnected from server!");
@@ -94,7 +98,7 @@ fn main() {
                                     break;
                                 },
                                 Ok(read_bytes) => {
-                                    buffer_offset += read_bytes;
+                                    buffer.offset += read_bytes;
                                     println!("Read {} bytes from server", read_bytes);
                                 },
                                 Err(e) => {
@@ -112,7 +116,8 @@ fn main() {
                         }
 
                         while let Some(packet) = outgoing_packets.pop_front() {
-                            match send_bytes(&mut socket, packet.as_bytes()) {
+                            let data = serialize_packet(packet);
+                            match send_bytes(&mut socket, &data) {
                                 Ok(sent_bytes) => {
                                     println!("Sent {} bytes", sent_bytes);
                                 },
@@ -137,41 +142,20 @@ fn main() {
         poll.reregister(&socket, LOCAL_TOKEN, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
 
         // Process incoming bytes to create packets
-        if buffer_offset == 0 {
+        if buffer.offset == 0 {
             continue;
         }
 
-        let message = String::from(str::from_utf8(&buffer[0..buffer_offset]).unwrap());
-        incoming_packets.push_back(message);
+        while let Some(packet) = deserialize_packet(&mut buffer) {
+            incoming_packets.push_back(packet);
+        }
 
-        buffer = [0; 1024];
-        buffer_offset = 0;
+        buffer.clear();
 
         // Handle packets
         while let Some(packet) = incoming_packets.pop_front() {
-            println!("> {}", packet);
-            messages.push(packet);
+            println!("> {}", packet.message);
+            messages.push(format!("{} says \"{}\"", packet.sender, packet.message));
         }
     }
-}
-
-fn send_bytes(socket: &mut TcpStream, buffer: &[u8]) -> Result<usize, io::Error> {
-    let mut len = buffer.len();
-    if len == 0 {
-        return Err(Error::new(ErrorKind::InvalidData, "Buffer is empty!"));
-    }
-
-    // Keep sending until we've sent the entire buffer
-    while len > 0 {
-        match socket.write(buffer) {
-            Ok(sent_bytes) => {
-                len -= sent_bytes;
-            },
-            Err(e) => {
-                return Err(e);
-            }
-        }
-    }
-
-    Ok(buffer.len())
 }
