@@ -3,7 +3,9 @@ extern crate bytes;
 extern crate gfx;
 extern crate doosknet;
 extern crate byteorder;
+extern crate rand;
 
+use std::env;
 use std::time::Duration;
 use std::collections::VecDeque;
 use std::io::{self, Read, Write, Error, ErrorKind, Cursor};
@@ -13,9 +15,17 @@ use mio::net::TcpStream;
 use gfx::{input, Window, Renderer};
 use gfx::input::{InputMan};
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
+use rand::Rng;
 use doosknet::*;
 
 fn main() {
+    let mut addr = "127.0.0.1:7667".parse().unwrap();
+
+    let args: Vec<String> = env::args().collect();
+    if args.len() >= 2 {
+        addr = args[1].parse().unwrap();
+    }
+
     let window_title: &str = "Rustychat";
     let window_width: u32 = 50 * gfx::CELL_WIDTH;
     let window_height: u32 = 15 * gfx::CELL_HEIGHT;
@@ -25,7 +35,6 @@ fn main() {
     let mut input_man: InputMan = InputMan::new();
 
     // Setup the client socket
-    let addr = "127.0.0.1:7667".parse().unwrap();
     let mut socket = TcpStream::connect(&addr).unwrap();
 
     // Create a poll instance
@@ -46,6 +55,9 @@ fn main() {
 
     let mut messages: Vec<String> = Vec::new();
 
+    let usernames = vec!["Bob", "Bill", "Jeb", "Jib", "Jim", "Mitch", "Deboe", "John"];
+    let username: &str = rand::thread_rng().choose(&usernames).unwrap();
+
     loop {
         // UI
         input::process_events(&mut window, &mut input_man);
@@ -58,7 +70,7 @@ fn main() {
             input_man.clear_input_string();
 
             if message.len() != 0 {
-                let packet = Packet::new("Client", &message);
+                let packet = Packet::new(username, &message);
                 outgoing_packets.push_back(packet);
             }
         }
