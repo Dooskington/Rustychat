@@ -6,11 +6,11 @@ extern crate byteorder;
 extern crate doosknet;
 
 use std::collections::{HashMap, VecDeque};
-use std::io::{self, Read, Write, Error, ErrorKind, Cursor};
+use std::io::{self, Read};
 use std::str;
+use std::net::ToSocketAddrs;
 use mio::*;
 use mio::net::{TcpListener, TcpStream};
-use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use doosknet::*;
 
 static SERVER_USERNAME: &'static str = "SERVER";
@@ -37,7 +37,7 @@ impl Connection {
 
 fn main() {
     // Setup the server socket
-    let addr = "127.0.0.1:7667".parse().unwrap();
+    let addr = "0.0.0.0:7667".parse().unwrap();
     let server = TcpListener::bind(&addr).unwrap();
 
     println!("Server started on {}", addr);

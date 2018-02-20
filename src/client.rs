@@ -8,22 +8,22 @@ extern crate rand;
 use std::env;
 use std::time::Duration;
 use std::collections::VecDeque;
-use std::io::{self, Read, Write, Error, ErrorKind, Cursor};
+use std::io::{self, Read};
 use std::str;
+use std::net::ToSocketAddrs;
 use mio::*;
 use mio::net::TcpStream;
 use gfx::{input, Window, Renderer};
 use gfx::input::{InputMan};
-use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use rand::Rng;
 use doosknet::*;
 
 fn main() {
-    let mut addr = "127.0.0.1:7667".parse().unwrap();
+    let mut addr = "127.0.0.1:7667".to_socket_addrs().unwrap();
 
     let args: Vec<String> = env::args().collect();
     if args.len() >= 2 {
-        addr = args[1].parse().unwrap();
+        addr = args[1].to_socket_addrs().unwrap();
     }
 
     let window_title: &str = "Rustychat";
@@ -35,7 +35,7 @@ fn main() {
     let mut input_man: InputMan = InputMan::new();
 
     // Setup the client socket
-    let mut socket = TcpStream::connect(&addr).unwrap();
+    let mut socket = TcpStream::connect(&addr.next().unwrap()).unwrap();
 
     // Create a poll instance
     let poll = Poll::new().unwrap();
