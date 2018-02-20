@@ -1,0 +1,8 @@
+[package]
+name = "rustychat-server"
+version = "0.1.0"
+authors = ["Declan Hopkins <hopkins.declan@gmail.com>"]
+
+[dependencies]
+doosknet = { path = "../doosknet-lib" }
+mio = "0.6"

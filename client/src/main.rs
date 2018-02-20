@@ -1,8 +1,6 @@
 extern crate mio;
-extern crate bytes;
-extern crate gfx;
 extern crate doosknet;
-extern crate byteorder;
+extern crate gfx;
 extern crate rand;
 
 use std::env;

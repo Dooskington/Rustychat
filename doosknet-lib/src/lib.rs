@@ -6,7 +6,7 @@ extern crate serde;
 extern crate bincode;
 extern crate byteorder;
 
-use std::io::{self, Read, Write, Error, ErrorKind, Cursor};
+use std::io::{self, Write, Error, ErrorKind, Cursor};
 use std::str;
 use mio::*;
 use mio::net::TcpStream;
@@ -56,8 +56,8 @@ pub fn deserialize_packet(buffer: &mut NetworkBuffer) -> Option<Packet> {
         return None;
     }
 
-    let mut body_size: usize = 0;
-    let mut packet: Option<Packet> = None;
+    let body_size: usize;
+    let packet: Option<Packet>;
     {
         let mut reader = Cursor::new(&buffer.data[..]);
 

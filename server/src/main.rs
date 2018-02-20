@@ -1,8 +1,4 @@
-extern crate serde;
-extern crate bincode;
 extern crate mio;
-extern crate bytes;
-extern crate byteorder;
 extern crate doosknet;
 
 use std::collections::{HashMap, VecDeque};
