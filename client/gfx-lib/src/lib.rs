@@ -96,6 +96,7 @@ pub fn resize_window(window: &mut Window, width: u32, height: u32) {
     window.height = height;
 }
 
+#[allow(dead_code)]
 pub struct Renderer {
     pub cols: u32,
     pub rows: u32,

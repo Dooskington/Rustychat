@@ -4,7 +4,6 @@ extern crate doosknet;
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read};
 use std::str;
-use std::net::ToSocketAddrs;
 use mio::*;
 use mio::net::{TcpListener, TcpStream};
 use doosknet::*;
@@ -80,21 +79,22 @@ fn main() {
                 },
                 token => {
                     // Get the connection
-                    let connection: &mut Connection = connections.get_mut(&token).unwrap();
+                    let conn: &mut Connection = connections.get_mut(&token).unwrap();
 
                     if event.readiness().is_readable() {
                         loop {
                             // Read until there are no more incoming bytes
-                            match connection.socket.read(&mut connection.buffer.data) {
+                            let buffer = &mut conn.buffer.data[conn.buffer.offset..];
+                            match conn.socket.read(buffer) {
                                 Ok(0) => {
                                     // Socket is closed
                                     println!("Client {:?} has disconnected!", token);
-                                    connection.is_disconnected = true;
+                                    conn.is_disconnected = true;
 
                                     break;
                                 },
                                 Ok(read_bytes) => {
-                                    connection.buffer.offset += read_bytes;
+                                    conn.buffer.offset += read_bytes;
                                     println!("Read {} bytes from client {:?}", read_bytes, token);
                                 },
                                 Err(e) => {
@@ -108,11 +108,11 @@ fn main() {
                     }
                     else if event.readiness().is_writable() {
                         // Send all outgoing packets
-                        while let Some(packet) = connection.outgoing_packets.pop_front() {
+                        while let Some(packet) = conn.outgoing_packets.pop_front() {
                             let data = serialize_packet(packet);
-                            match send_bytes(&mut connection.socket, &data) {
+                            match send_bytes(&mut conn.socket, &data) {
                                 Ok(sent_bytes) => {
-                                    println!("Sent {} bytes to client {:?}", sent_bytes, connection.token);
+                                    println!("Sent {} bytes to client {:?}", sent_bytes, conn.token);
                                 },
                                 Err(e) => {
                                     eprintln!("send_bytes() failed with error {:?}", e);
@@ -141,8 +141,6 @@ fn main() {
             while let Some(packet) = deserialize_packet(&mut connection.buffer) {
                 incoming_packets.push_back(packet);
             }
-
-            connection.buffer.clear();
         }
 
         // Handle packets

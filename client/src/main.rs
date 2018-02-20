@@ -100,7 +100,7 @@ fn main() {
                     if event.readiness().is_readable() {
                         loop {
                             // Read until there are no more incoming bytes
-                            match socket.read(&mut buffer.data) {
+                            match socket.read(&mut buffer.data[buffer.offset..]) {
                                 Ok(0) => {
                                     // Socket is closed
                                     println!("Disconnected from server!");
@@ -159,8 +159,6 @@ fn main() {
         while let Some(packet) = deserialize_packet(&mut buffer) {
             incoming_packets.push_back(packet);
         }
-
-        buffer.clear();
 
         // Handle packets
         while let Some(packet) = incoming_packets.pop_front() {

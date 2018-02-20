@@ -94,7 +94,7 @@ fn process_key_input(input_man: &mut InputMan, event: &KeyboardInput) {
 }
 
 fn keycode_to_string(keycode: VirtualKeyCode, is_upper: bool) -> Option<String> {
-    let mut character: char;
+    let character: char;
 
     match keycode {
         VirtualKeyCode::A => character = 'a',

@@ -78,6 +78,7 @@ pub fn deserialize_packet(buffer: &mut NetworkBuffer) -> Option<Packet> {
         packet = Some(deserialized);
     }
 
+    // Remove the packet from the front of the buffer, and shift the rest of the buffer forward.
     buffer.drain(body_size + PACKET_HEADER_SIZE);
 
     packet
